@@ -7,6 +7,8 @@
 
 	Created by Yurii Salimov, February, 2018.
 	Released into the public domain.
+
+	Updates by Crazor, November 2018
 */
 #include "MAX6675_Thermocouple.h"
 
@@ -25,13 +27,14 @@ MAX6675_Thermocouple::MAX6675_Thermocouple(
 	const int SCK_pin,
 	const int CS_pin,
 	const int SO_pin,
-	const int readingsNumber,
-	const long delayTime
+	const unsigned int readingsNumber,
+	const unsigned long delayTime
 ) {
 	this->SCK_pin = SCK_pin;
 	this->CS_pin = CS_pin;
 	this->SO_pin = SO_pin;
 	setReadingsNumber(readingsNumber);
+	this->dataPoints = new std::deque<double>();
 	setDelayTime(delayTime);
 	init();
 }
@@ -43,6 +46,22 @@ inline void MAX6675_Thermocouple::init() {
 	digitalWrite(this->CS_pin, HIGH);
 }
 
+void MAX6675_Thermocouple::update() {
+	static unsigned long lastUpdate = 0;
+	auto now = millis();
+	if ((now - lastUpdate) > this->delayTime) {
+		lastUpdate = now;
+		auto value = this->readValue();
+		if (value != NAN) {
+			if (this->dataPoints->size() >= this->readingsNumber) {
+				this->dataPoints->pop_front();
+			}
+			this->dataPoints->push_back(value / this->readingsNumber);
+			this->recalculate();
+		}
+	}
+}
+
 /**
 	Reads a temperature from the thermocouple.
 	Takes a readings number samples in a row,
@@ -50,15 +69,22 @@ inline void MAX6675_Thermocouple::init() {
 	@return average temperature in Celsius.
 */
 double MAX6675_Thermocouple::readCelsius() {
-	double celsiusSum = 0;
-	for (int i = 0; i < this->readingsNumber; i++) {
-		celsiusSum += calcCelsius();
-		sleep();
-	}
-	return (celsiusSum / this->readingsNumber);
+	return this->meanTempC;
 }
 
-inline double MAX6675_Thermocouple::calcCelsius() {
+void MAX6675_Thermocouple::recalculate() {
+	if (this->dataPoints->size() != this->readingsNumber) {
+		this->meanTempC = NAN;
+		return;
+	}
+	double celsiusTemp = 0;
+	for (auto d: *this->dataPoints) {
+		celsiusTemp += d;
+	}
+	this->meanTempC = celsiusTemp;
+}
+
+inline double MAX6675_Thermocouple::readValue() {
 	int value;
 	digitalWrite(this->CS_pin, LOW);
 	delay(1);
@@ -87,10 +113,6 @@ byte MAX6675_Thermocouple::spiread() {
 	return value;
 }
 
-inline void MAX6675_Thermocouple::sleep() {
-	delay(this->delayTime);
-}
-
 /**
 	Returns a temperature in Kelvin.
 	Reads the temperature in Celsius,
@@ -98,10 +120,10 @@ inline void MAX6675_Thermocouple::sleep() {
 	@return temperature in Kelvin.
 */
 double MAX6675_Thermocouple::readKelvin() {
-	return celsiusToKelvins(readCelsius());
+	return celsiusToKelvin(readCelsius());
 }
 
-inline double MAX6675_Thermocouple::celsiusToKelvins(const double celsius) {
+inline double MAX6675_Thermocouple::celsiusToKelvin(const double celsius) {
 	return (celsius + 273.15);
 }
 
@@ -115,19 +137,16 @@ double MAX6675_Thermocouple::readFahrenheit() {
 	return celsiusToFahrenheit(readCelsius());
 }
 
-double MAX6675_Thermocouple::readFarenheit() {
-	return readFahrenheit();
-}
-
 inline double MAX6675_Thermocouple::celsiusToFahrenheit(const double celsius) {
 	return (celsius * 9.0 / 5.0 + 32);
 }
 
-void MAX6675_Thermocouple::setReadingsNumber(const int newReadingsNumber) {
-	this->readingsNumber = validate(readingsNumber, MAX6675_DEFAULT_READINGS_NUMBER);
+void MAX6675_Thermocouple::setReadingsNumber(const unsigned int newReadingsNumber) {
+	this->readingsNumber = validate(newReadingsNumber, MAX6675_DEFAULT_READINGS_NUMBER);
+	this->dataPoints = new std::deque<double>();
 }
 
-void MAX6675_Thermocouple::setDelayTime(const long newDelayTime) {
+void MAX6675_Thermocouple::setDelayTime(const unsigned long newDelayTime) {
 	this->delayTime = validate(newDelayTime, MAX6675_DEFAULT_DELAY_TIME);
 }
 

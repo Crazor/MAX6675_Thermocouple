@@ -8,23 +8,33 @@
 		or
 		MAX6675_Thermocouple thermocouple(
 			SCK_pin, CS_pin, SO_pin,
-			READINGS_NUMBER, DELAY_TIME
+			WINDOW_SIZE, DELAY_TIME
 		);
 
 		Where,
-		READINGS_NUMBER - How many readings are taken
-		to determine a mean temperature. The more values,
-		the longer a calibration is performed, but the readings
-		will be more accurate.
+		WINDOW_SIZE - Window size of the moving average to apply to
+		the data points. Set to 1 to disable averaging.
 
 		DELAY_TIME - Delay time between a temperature readings
-		from the temperature sensor (ms).
+		from the temperature sensor (ms). A value of 250ms seems to be
+		the minimum before the chip appears to "lock up", i.e. return
+		the same value each time. Supposedly, the MAX6675 only takes
+		readings when not busy transmitting values.
+
+	Update:
+		Call update() from the main loop. A value is only read after
+		specified delay has passed.
 
 	Read temperature:
 		double celsius = thermocouple.readCelsius();
 		double kelvin = thermocouple.readKelvin();
 		double fahrenheit = thermocouple.readFahrenheit();
 
+		All methods return NaN until WINDOW_SIZE readings have been taken.
+
+	v 2.0:
+	- Optimized moving average code
+	- Refactored so that update() can be called from the main loop
 	v.1.1.2:
 	- optimized calls of private methods.
 
@@ -32,6 +42,8 @@
 
 	Created by Yurii Salimov, February, 2018.
 	Released into the public domain.
+
+	Updates by Crazor, November 2018
 */
 #ifndef MAX6675_THERMOCOUPLE_H
 #define MAX6675_THERMOCOUPLE_H
@@ -42,8 +54,10 @@
 	#include <WProgram.h>
 #endif
 
+#include <deque>
+
 #define MAX6675_DEFAULT_READINGS_NUMBER	5
-#define MAX6675_DEFAULT_DELAY_TIME	5
+#define MAX6675_DEFAULT_DELAY_TIME	250
 
 class MAX6675_Thermocouple final {
 
@@ -52,8 +66,11 @@ class MAX6675_Thermocouple final {
 		int CS_pin;
 		int SO_pin;
 
-		volatile int readingsNumber;
-		volatile long delayTime;
+		volatile unsigned int readingsNumber;
+		volatile unsigned long delayTime;
+
+		std::deque<double> *dataPoints;
+		double meanTempC;
 
 	public:
 		/**
@@ -82,9 +99,15 @@ class MAX6675_Thermocouple final {
 			const int SCK_pin,
 			const int CS_pin,
 			const int SO_pin,
-			const int readingsNumber,
-			const long delayTime
+			const unsigned int readingsNumber,
+			const unsigned long delayTime
 		);
+
+		/** 
+		    Reads current value from sensor observing the delay and calculates mean temperature.
+			Call from main loop.
+		 */
+		void update();
 
 		/**
 			Reads and returns a temperature in Celsius
@@ -108,9 +131,9 @@ class MAX6675_Thermocouple final {
 		*/
 		double readFarenheit();
 
-		void setReadingsNumber(const int newReadingsNumber);
+		void setReadingsNumber(const unsigned int newReadingsNumber);
 
-		void setDelayTime(const long newDelayTime);
+		void setDelayTime(const unsigned long newDelayTime);
 
 	private:
 		/**
@@ -119,16 +142,21 @@ class MAX6675_Thermocouple final {
 		inline void init();
 
 		/**
+		 	Reads the current value from the chip
+		 */
+		inline double readValue();
+
+		/**
 			Calculates a temperature in Celsius.
 			@return temperature in Celsius.
 		*/
-		inline double calcCelsius();
+		inline void recalculate();
 
 		/**
 			Celsius to Kelvin conversion:
 			K = C + 273.15
 		*/
-		inline double celsiusToKelvins(const double celsius);
+		inline double celsiusToKelvin(const double celsius);
 
 		/**
 			Celsius to Fahrenheit conversion:
@@ -137,8 +165,6 @@ class MAX6675_Thermocouple final {
 		inline double celsiusToFahrenheit(const double celsius);
 
 		byte spiread();
-
-		inline void sleep();
 
 		template <typename A, typename B> A validate(const A data, const B min);
 };
